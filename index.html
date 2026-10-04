@@ -50,7 +50,7 @@ dialog::backdrop{background:rgba(0,0,0,.5)}
 .meta{color:var(--mute);font-size:13px;margin:4px 0 14px}
 .btn{display:block;width:100%;border:1px solid var(--ink);background:var(--ink);color:var(--bg);border-radius:10px;padding:12px;text-align:center;text-decoration:none}
 .btn.ghost{background:transparent;color:var(--ink);border-color:var(--line)}
-.stat{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:16px 0 4px}
+.stat{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin:16px 0 4px}
 .stat button{border:1px solid var(--line);background:transparent;border-radius:10px;padding:10px 4px}
 .stat button[aria-pressed="true"]{border-color:var(--acc);background:var(--acc);color:var(--on);font-weight:500}
 .lbl{font-size:13px;color:var(--mute);margin:0 0 6px}
@@ -67,9 +67,11 @@ form input[type=text],form input[type=number],form input[type=url]{width:100%;ma
     <div><h1>내 위시리스트</h1><div class="sub" id="count"></div></div>
     <button class="add" id="addBtn" aria-label="상품 등록">+</button>
   </header>
+  <div style="display:flex;gap:8px;margin-bottom:10px"><input type="search" id="q" placeholder="브랜드·상품명·메모 검색" style="flex:1;min-width:0;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--sf)"><select id="sort" style="padding:10px;border:1px solid var(--line);border-radius:10px;background:var(--sf)"><option value="new">최신순</option><option value="lo">낮은 가격순</option><option value="hi">높은 가격순</option></select></div>
   <div class="row" id="cats" role="group" aria-label="카테고리"></div>
   <div class="seg" role="tablist">
     <button role="tab" id="tabActive" aria-selected="true">위시리스트</button>
+    <button role="tab" id="tabDone" aria-selected="false">구매 완료</button>
     <button role="tab" id="tabOff" aria-selected="false">관심 없음</button>
   </div>
   <div class="grid" id="grid"></div>
@@ -79,6 +81,7 @@ form input[type=text],form input[type=number],form input[type=url]{width:100%;ma
 
 <dialog id="detail"><div class="pad" id="detailBody"></div></dialog>
 
+<dialog id="cropDlg"><div class="pad"><p class="lbl" style="font-size:16px;color:var(--ink);font-weight:700;margin:0 0 4px">사진 자르기</p><p class="meta" style="margin:0 0 10px">남기고 싶은 부분을 드래그해서 선택하세요.</p><canvas id="cv" style="display:block;margin:0 auto;touch-action:none;max-width:100%;border-radius:8px"></canvas><div class="two"><button type="button" class="btn ghost" id="cropSkip">원본 그대로</button><button type="button" class="btn" id="cropOk">자르기</button></div></div></dialog>
 <dialog id="formDlg">
   <form class="pad" id="form" autocomplete="off">
     <p class="lbl" id="formTitle" style="font-size:16px;color:var(--ink);font-weight:700;margin:0"></p>
@@ -89,6 +92,7 @@ form input[type=text],form input[type=number],form input[type=url]{width:100%;ma
     <label>상품명<input type="text" id="fName" required maxlength="60"></label>
     <label>가격(원)<input type="number" id="fPrice" required min="0" inputmode="numeric"></label>
     <label>판매 링크<input type="url" id="fLink" placeholder="https://"></label>
+    <label>메모<input type="text" id="fMemo" maxlength="80" placeholder="사이즈, 세일 기다리는 중 등"></label>
     <label>카테고리</label>
     <div class="row" id="fCats" style="flex-wrap:wrap"></div>
     <div class="err" id="err"></div>
@@ -101,7 +105,7 @@ form input[type=text],form input[type=number],form input[type=url]{width:100%;ma
 
 <script>
 const CATS=['의류','가방','신발','뷰티','기타'];
-const ST=[['want','사고 싶음'],['think','고민됨'],['off','관심 없음']];
+const ST=[['want','사고 싶음'],['think','고민됨'],['done','구매 완료'],['off','관심 없음']];
 const KEY='wishlist.v1';
 let items=[],cat='전체',tab='active',editId=null,fCat='의류',fImg='',curId=null;
 let col=null,dbState='wait';
@@ -130,14 +134,18 @@ const dstr=t=>{const d=new Date(t);return d.getFullYear()+'.'+String(d.getMonth(
 const safeUrl=u=>/^https?:\/\//i.test(u||'')?u:'';
 
 function render(){
-  const act=items.filter(i=>i.status!=='off'), off=items.filter(i=>i.status==='off');
-  $('count').textContent=`저장한 상품 ${act.length}개`+'';
+  const act=items.filter(i=>i.status==='want'||i.status==='think'),done=items.filter(i=>i.status==='done'),off=items.filter(i=>i.status==='off');
+  const sum=items.filter(i=>i.status==='want').reduce((a,i)=>a+Number(i.price||0),0);
+  $('count').textContent=`저장한 상품 ${act.length}개`+(sum?` · 사고 싶음 합계 ${won(sum)}`:'');
   $('tabActive').setAttribute('aria-selected',tab==='active');
+  $('tabDone').setAttribute('aria-selected',tab==='done');
   $('tabOff').setAttribute('aria-selected',tab==='off');
+  $('tabDone').textContent=`구매 완료${done.length?' '+done.length:''}`;
   $('tabOff').textContent=`관심 없음${off.length?' '+off.length:''}`;
   $('cats').innerHTML=['전체',...CATS].map(c=>`<button class="chip" aria-pressed="${c===cat}" data-c="${c}">${c}</button>`).join('');
-  const base=tab==='active'?act:off;
-  const list=base.filter(i=>cat==='전체'||i.cat===cat).sort((a,b)=>b.date-a.date);
+  const base=tab==='active'?act:tab==='done'?done:off,qq=$('q').value.trim().toLowerCase(),so=$('sort').value;
+  const list=base.filter(i=>(cat==='전체'||i.cat===cat)&&(!qq||[i.brand,i.name,i.memo].join(' ').toLowerCase().includes(qq)));
+  list.sort(so==='lo'?(a,b)=>a.price-b.price:so==='hi'?(a,b)=>b.price-a.price:(a,b)=>b.date-a.date);
   if(!list.length){
     $('grid').innerHTML=`<div class="empty">${tab==='off'?'관심 없음으로 옮긴 상품이 여기에 모여요.':items.length?'이 카테고리에 저장한 상품이 없어요.':'사고 싶은 상품을 저장해 보세요.'}${!items.length?'<br><button id="emptyAdd">첫 상품 등록</button>':''}</div>`;
     return;
@@ -150,7 +158,7 @@ function openDetail(id){
   const u=safeUrl(i.link);
   $('detailBody').innerHTML=`<div class="big">${i.img?`<img src="${i.img}" alt="">`:''}</div>
   ${i.brand?`<div class="dbr">${esc(i.brand)}</div>`:''}<div class="dn">${esc(i.name)}</div><div class="dp">${won(i.price)}</div>
-  <div class="meta">${esc(i.cat)} · 등록일 ${dstr(i.date)}</div>
+  <div class="meta">${esc(i.cat)} · 등록일 ${dstr(i.date)}</div>${i.memo?`<div class="meta" style="color:var(--ink)">${esc(i.memo)}</div>`:''}
   ${u?`<a class="btn" href="${esc(u)}" target="_blank" rel="noopener noreferrer">판매 페이지로 이동</a>`:'<div class="meta">등록된 판매 링크가 없어요.</div>'}
   <p class="lbl" style="margin-top:16px">현재 상태</p>
   <div class="stat">${ST.map(s=>`<button data-s="${s[0]}" aria-pressed="${i.status===s[0]}">${s[1]}</button>`).join('')}</div>
@@ -164,7 +172,7 @@ function setPick(){$('pickImg').hidden=!fImg;if(fImg)$('pickImg').src=fImg;$('pi
 function openForm(id){
   editId=id||null;const i=id&&items.find(x=>x.id===id);
   $('formTitle').textContent=i?'상품 수정':'상품 등록';
-  $('fBrand').value=i?i.brand||'':'';$('fName').value=i?i.name:'';$('fPrice').value=i?i.price:'';$('fLink').value=i?i.link||'':'';
+  $('fBrand').value=i?i.brand||'':'';$('fName').value=i?i.name:'';$('fPrice').value=i?i.price:'';$('fLink').value=i?i.link||'':'';$('fMemo').value=i?i.memo||'':'';
   fCat=i?i.cat:(cat!=='전체'?cat:'의류');fImg=i?i.img||'':'';
   $('err').textContent='';$('pasteTxt').value='';$('pasteNote').textContent='';$('file').value='';drawFCats();setPick();
   if($('detail').open)$('detail').close();
@@ -194,7 +202,7 @@ function shrink(file){
 $('addBtn').onclick=()=>openForm();
 $('cats').onclick=e=>{const c=e.target.dataset.c;if(c){cat=c;render()}};
 $('tabActive').onclick=()=>{tab='active';render()};
-$('tabOff').onclick=()=>{tab='off';render()};
+$('tabOff').onclick=()=>{tab='off';render()};$('tabDone').onclick=()=>{tab='done';render()};$('q').oninput=render;$('sort').onchange=render;
 $('grid').onclick=e=>{
   if(e.target.id==='emptyAdd')return openForm();
   const b=e.target.closest('.card');if(b)openDetail(b.dataset.id);
@@ -209,17 +217,17 @@ $('detailBody').onclick=e=>{
 $('fCats').onclick=e=>{const c=e.target.dataset.c;if(c){fCat=c;drawFCats()}};
 $('file').onchange=async e=>{
   const f=e.target.files[0];if(!f)return;
-  try{fImg=await shrink(f);$('err').textContent='';setPick()}catch(x){$('err').textContent='이미지를 불러오지 못했어요. 다른 사진을 선택해 주세요.'}
+  try{fImg=await shrink(f);$('err').textContent='';setPick();openCrop(fImg)}catch(x){$('err').textContent='이미지를 불러오지 못했어요. 다른 사진을 선택해 주세요.'}
 };
 $('cancel').onclick=()=>$('formDlg').close();
 $('form').onsubmit=e=>{
   e.preventDefault();
-  const brand=$('fBrand').value.trim(),name=$('fName').value.trim(),price=Number($('fPrice').value),link=$('fLink').value.trim();
+  const memo=$('fMemo').value.trim(),brand=$('fBrand').value.trim(),name=$('fName').value.trim(),price=Number($('fPrice').value),link=$('fLink').value.trim();
   if(!name){$('err').textContent='상품명을 입력해 주세요.';return}
   if(link&&!safeUrl(link)){$('err').textContent='링크는 http:// 또는 https://로 시작해야 해요.';return}
   let it;
-  if(editId){it=items.find(x=>x.id===editId);Object.assign(it,{brand,name,price,link,cat:fCat,img:fImg})}
-  else{it={id:Date.now().toString(36)+Math.random().toString(36).slice(2,6),brand,name,price,link,cat:fCat,img:fImg,status:'want',date:Date.now()};items.push(it)}
+  if(editId){it=items.find(x=>x.id===editId);Object.assign(it,{memo,brand,name,price,link,cat:fCat,img:fImg})}
+  else{it={id:Date.now().toString(36)+Math.random().toString(36).slice(2,6),memo,brand,name,price,link,cat:fCat,img:fImg,status:'want',date:Date.now()};items.push(it)}
   putItem(it,true);$('formDlg').close();render();
   if(editId)openDetail(editId);
 };
@@ -280,6 +288,25 @@ $('imp').onchange=async e=>{
     list.forEach(x=>{const k=items.findIndex(y=>y.id===x.id);if(k>=0)items[k]=x;else items.push(x)});
     saveLocal();render();$('bkNote').textContent=`상품 ${list.length}개를 가져왔어요.`;
   }catch(x){$('bkNote').textContent='파일을 읽지 못했어요. 올바른 백업 파일인지 확인해 주세요.'}
+};
+let cImg=null,cr=null,cs=1,ds=null;
+function openCrop(u){const im=new Image();im.onload=()=>{cImg=im;const cv=$('cv');cs=Math.min((Math.min(380,window.innerWidth-80))/im.width,(window.innerHeight*.55)/im.height);cv.width=Math.round(im.width*cs);cv.height=Math.round(im.height*cs);cr=null;drawCrop();$('cropDlg').showModal()};im.src=u}
+function drawCrop(){const cv=$('cv'),x=cv.getContext('2d');x.drawImage(cImg,0,0,cv.width,cv.height);if(cr){x.fillStyle='rgba(0,0,0,.5)';x.fillRect(0,0,cv.width,cv.height);x.drawImage(cImg,cr.x/cs,cr.y/cs,cr.w/cs,cr.h/cs,cr.x,cr.y,cr.w,cr.h);x.strokeStyle='#fff';x.lineWidth=2;x.strokeRect(cr.x,cr.y,cr.w,cr.h)}}
+function cpos(e){const cv=$('cv'),b=cv.getBoundingClientRect();return{x:Math.max(0,Math.min(cv.width,(e.clientX-b.left)*cv.width/b.width)),y:Math.max(0,Math.min(cv.height,(e.clientY-b.top)*cv.height/b.height))}}
+$('cv').onpointerdown=e=>{ds=cpos(e);$('cv').setPointerCapture(e.pointerId)};
+$('cv').onpointermove=e=>{if(!ds)return;const p=cpos(e);cr={x:Math.min(ds.x,p.x),y:Math.min(ds.y,p.y),w:Math.abs(p.x-ds.x),h:Math.abs(p.y-ds.y)};drawCrop()};
+$('cv').onpointerup=()=>{ds=null};
+function jpg(c){let q=.85,u=c.toDataURL('image/jpeg',q);while(u.length>120000&&q>.45){q-=.08;u=c.toDataURL('image/jpeg',q)}return u}
+$('cropSkip').onclick=()=>$('cropDlg').close();
+$('cropOk').onclick=()=>{
+  if(cr&&cr.w>20&&cr.h>20){
+    let c=document.createElement('canvas');c.width=Math.round(cr.w/cs);c.height=Math.round(cr.h/cs);
+    c.getContext('2d').drawImage(cImg,cr.x/cs,cr.y/cs,cr.w/cs,cr.h/cs,0,0,c.width,c.height);
+    let u=jpg(c);
+    while(u.length>120000&&c.width>300){const n=document.createElement('canvas');n.width=Math.round(c.width*.8);n.height=Math.round(c.height*.8);n.getContext('2d').drawImage(c,0,0,n.width,n.height);c=n;u=jpg(c)}
+    fImg=u;setPick();
+  }
+  $('cropDlg').close();
 };
 dbState='off';render();
 </script>
