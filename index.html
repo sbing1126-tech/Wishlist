@@ -73,6 +73,8 @@ form input[type=text],form input[type=number],form input[type=url]{width:100%;ma
     <button role="tab" id="tabOff" aria-selected="false">관심 없음</button>
   </div>
   <div class="grid" id="grid"></div>
+  <div class="row" style="justify-content:center;margin-top:32px"><button class="chip" id="exp" type="button">백업 파일 저장</button><label class="chip" style="position:relative;overflow:hidden">백업 불러오기<input type="file" id="imp" accept=".json,application/json" style="position:absolute;inset:0;width:100%;height:100%;opacity:0;font-size:0"></label></div>
+  <div class="meta" id="bkNote" style="text-align:center;margin:8px 0 0"></div>
 </div>
 
 <dialog id="detail"><div class="pad" id="detailBody"></div></dialog>
@@ -257,6 +259,27 @@ $('pasteGo').onclick=()=>{
   if(d.cat){fCat=d.cat;drawFCats()}
   const got=[d.brand&&'브랜드',d.name&&'상품명',d.price&&'가격',d.link&&'링크',d.cat&&'카테고리'].filter(Boolean);
   $('pasteNote').textContent=got.length?`${got.join(', ')}을(를) 채웠어요. 규칙으로 찾는 방식이라 틀릴 수 있으니 확인해 주세요.`:'찾을 수 있는 정보가 없어요. 직접 입력해 주세요.';
+};
+$('exp').onclick=async()=>{
+  const n=new Date(),p=v=>String(v).padStart(2,'0');
+  const name='wishlist-backup-'+n.getFullYear()+p(n.getMonth()+1)+p(n.getDate())+'.json';
+  const file=new File([JSON.stringify({app:'wishlist',v:1,items})],name,{type:'application/json'});
+  try{
+    if(navigator.canShare&&navigator.canShare({files:[file]})){await navigator.share({files:[file]});$('bkNote').textContent='백업 파일을 저장했어요.';return}
+  }catch(e){if(e&&e.name==='AbortError')return}
+  const a=document.createElement('a');a.href=URL.createObjectURL(file);a.download=name;document.body.appendChild(a);a.click();a.remove();
+  $('bkNote').textContent='백업 파일을 내려받았어요.';
+};
+$('imp').onchange=async e=>{
+  const f=e.target.files[0];e.target.value='';if(!f)return;
+  try{
+    const d=JSON.parse(await f.text());
+    const list=(Array.isArray(d)?d:d.items||[]).filter(x=>x&&x.id&&x.name);
+    if(!list.length){$('bkNote').textContent='가져올 상품이 없어요. 올바른 백업 파일인지 확인해 주세요.';return}
+    if(!confirm(`상품 ${list.length}개를 가져올까요? 같은 상품은 백업 내용으로 덮어써요.`))return;
+    list.forEach(x=>{const k=items.findIndex(y=>y.id===x.id);if(k>=0)items[k]=x;else items.push(x)});
+    saveLocal();render();$('bkNote').textContent=`상품 ${list.length}개를 가져왔어요.`;
+  }catch(x){$('bkNote').textContent='파일을 읽지 못했어요. 올바른 백업 파일인지 확인해 주세요.'}
 };
 dbState='off';render();
 </script>
