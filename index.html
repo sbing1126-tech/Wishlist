@@ -80,6 +80,7 @@ form input[type=text],form input[type=number],form input[type=url]{width:100%;ma
 <dialog id="formDlg">
   <form class="pad" id="form" autocomplete="off">
     <p class="lbl" id="formTitle" style="font-size:16px;color:var(--ink);font-weight:700;margin:0"></p>
+    <div style="margin-top:14px"><p class="lbl" style="margin:0">상품 정보 붙여넣기</p><textarea id="pasteTxt" rows="3" maxlength="6000" placeholder="상품 페이지에서 복사한 브랜드, 상품명, 가격, 링크를 붙여넣으세요"></textarea><button type="button" class="btn ghost" id="pasteGo" style="margin-top:6px">붙여넣은 내용으로 자동 입력</button><div class="meta" id="pasteNote" style="margin:6px 0 0"></div></div>
     <p class="lbl" style="margin:14px 0 0">상품 이미지</p>
     <div class="pick" id="pick"><span id="pickTxt">사진 선택</span><img id="pickImg" alt="" hidden><input type="file" id="file" accept="image/*" aria-label="상품 이미지 선택"></div>
     <label>브랜드명<input type="text" id="fBrand" maxlength="40"></label>
@@ -163,7 +164,7 @@ function openForm(id){
   $('formTitle').textContent=i?'상품 수정':'상품 등록';
   $('fBrand').value=i?i.brand||'':'';$('fName').value=i?i.name:'';$('fPrice').value=i?i.price:'';$('fLink').value=i?i.link||'':'';
   fCat=i?i.cat:(cat!=='전체'?cat:'의류');fImg=i?i.img||'':'';
-  $('err').textContent='';$('file').value='';drawFCats();setPick();
+  $('err').textContent='';$('pasteTxt').value='';$('pasteNote').textContent='';$('file').value='';drawFCats();setPick();
   if($('detail').open)$('detail').close();
   $('formDlg').showModal();
 }
@@ -219,6 +220,43 @@ $('form').onsubmit=e=>{
   else{it={id:Date.now().toString(36)+Math.random().toString(36).slice(2,6),brand,name,price,link,cat:fCat,img:fImg,status:'want',date:Date.now()};items.push(it)}
   putItem(it,true);$('formDlg').close();render();
   if(editId)openDetail(editId);
+};
+const KW={'신발':/신발|슈즈|스니커|운동화|부츠|로퍼|샌들|슬리퍼|힐|뮬/,'가방':/가방|백팩|토트|숄더|크로스백|클러치|파우치|지갑|에코백/,'뷰티':/크림|세럼|립스틱|립밤|립글로스|틴트|파운데이션|향수|마스크팩|선크림|쿠션|토너|에센스|샴푸|앰플|클렌징/,'의류':/자켓|재킷|코트|니트|셔츠|티셔츠|바지|팬츠|원피스|스커트|청바지|데님|후드|맨투맨|블루종|점퍼|가디건|조끼|패딩|슬랙스|블라우스|레깅스/};
+function parseProduct(text){
+  const out={};
+  const um=text.match(/https?:\/\/[^\s"'<>]+/);
+  if(um){out.link=um[0]}
+  const body=text.replace(/https?:\/\/[^\s"'<>]+/g,' ');
+  let nums=[...body.matchAll(/(\d{1,3}(?:,\d{3})+|\d{4,})\s*원/g)].map(m=>+m[1].replace(/,/g,''));
+  if(!nums.length)nums=[...body.matchAll(/₩\s*(\d{1,3}(?:,\d{3})+|\d{4,})/g)].map(m=>+m[1].replace(/,/g,''));
+  nums=nums.filter(n=>n>=1000);
+  if(nums.length){const mx=Math.max(...nums);out.price=Math.min(...nums.filter(n=>n>=mx*.3))}
+  const lines=body.split(/\n+/).map(l=>l.trim()).filter(Boolean);
+  const cand=lines.filter(l=>l.length>=2&&!/원|%|배송|적립|쿠폰|리뷰|구매|할인|무료|^[\d,.\s]+$/.test(l));
+  let ni=cand.findIndex(l=>l.length>=8);
+  if(ni<0)ni=0;
+  if(cand[ni]){
+    out.name=cand[ni];
+    const prev=cand[ni-1];
+    if(prev&&prev.length<=20&&!/\d/.test(prev))out.brand=prev;
+    else{const b=out.name.match(/^\[([^\]]+)\]\s*(.*)$/);if(b){out.brand=b[1].length>12?b[1].split(/\s+/)[0]:b[1];if(b[2])out.name=b[2]}}
+  }
+  if(!out.name&&lines[0]){const n=lines[0].replace(/[\d,]+\s*원|₩\s*[\d,]+|\d+%/g,'').trim();if(n.length>=2)out.name=n}
+  const all=out.name||text;
+  for(const c of ['신발','가방','뷰티','의류']){if(KW[c].test(all)){out.cat=c;break}}
+  return out;
+}
+$('pasteGo').onclick=()=>{
+  const t=$('pasteTxt').value.trim();
+  if(!t){$('pasteNote').textContent='붙여넣은 내용이 없어요.';return}
+  const d=parseProduct(t);
+  if(d.brand)$('fBrand').value=d.brand.slice(0,40);
+  if(d.name)$('fName').value=d.name.slice(0,60);
+  if(d.price)$('fPrice').value=d.price;
+  if(d.link&&!$('fLink').value)$('fLink').value=d.link;
+  if(d.cat){fCat=d.cat;drawFCats()}
+  const got=[d.brand&&'브랜드',d.name&&'상품명',d.price&&'가격',d.link&&'링크',d.cat&&'카테고리'].filter(Boolean);
+  $('pasteNote').textContent=got.length?`${got.join(', ')}을(를) 채웠어요. 규칙으로 찾는 방식이라 틀릴 수 있으니 확인해 주세요.`:'찾을 수 있는 정보가 없어요. 직접 입력해 주세요.';
 };
 dbState='off';render();
 </script>
